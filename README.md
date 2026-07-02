@@ -1,59 +1,203 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Slot Booking Service
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+## Установка и запуск
 
-## About Laravel
+```bash
+# 1. Клонирование репозитория
+git clone git@github.com:all-sav/slot-booking-service.git
+cd slot-booking-service
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+# 2. Установка зависимостей
+composer install
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+# 3. Настройка окружения
+cp .env.example .env
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+# 4. Настройка подключения к БД в .env
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=slot_booking
+DB_USERNAME=root
+DB_PASSWORD=
 
-## Learning Laravel
+# 5. Настройка Redis (для кеша и блокировок)
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+# 6. Генерация ключа приложения
+php artisan key:generate
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+# 7. Запуск миграций и сидеров
+php artisan migrate
+php artisan db:seed
 
-## Laravel Sponsors
+# 8. Запуск сервера (нужен докер)
+./vendor/bin/sail up -d
+```
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## API Endpoints
+**1. Получение доступных слотов**
 
-### Premium Partners
+Метод: GET /api/slots/availability
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+Описание: Возвращает список всех слотов с информацией о вместимости и доступных местах. Результат кешируется на 10 секунд с защитой от cache stampede.
 
-## Contributing
+**Пример запроса:**
+```
+curl -X GET http://localhost:8000/api/slots/availability
+```
+**Пример ответа:**
+```
+[
+{
+"slot_id": 1,
+"capacity": 10,
+"remaining": 6
+},
+{
+"slot_id": 2,
+"capacity": 5,
+"remaining": 0
+},
+{
+"slot_id": 3,
+"capacity": 8,
+"remaining": 8
+}
+]
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+---
 
-## Code of Conduct
+2. Создание холда
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+Метод: POST /api/slots/{id}/hold
 
-## Security Vulnerabilities
+Заголовки:
+Idempotency-Key: <UUID> - Ключ идемпотентности
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Описание: Создает временный холд на слот. Холд живет 5 минут. Проверяет доступность мест, но НЕ резервирует их. Повторный запрос с тем же ключом возвращает прежний результат.
 
-## License
+Пример запроса:
+```
+curl -X POST http://localhost:8000/api/slots/1/hold -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000"
+```
+Пример ответа (201 Created):
+```
+{
+"hold_id": 1,
+"slot_id": 1,
+"status": "held",
+"idempotency_key": "550e8400-e29b-41d4-a716-446655440000",
+}
+```
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+---
+
+3. Повторный запрос с тем же ключом (идемпотентность)
+
+**Пример запроса:**
+```
+curl -X POST http://localhost:8000/api/slots/1/hold -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000"
+```
+**Пример ответа (200 OK):**
+```
+{
+"hold_id": 1,
+"slot_id": 1,
+"status": "held",
+"idempotency_key": "550e8400-e29b-41d4-a716-446655440000",
+"created_at": "2024-01-01T12:00:00+00:00",
+"expires_at": "2024-01-01T12:05:00+00:00"
+}
+```
+Ответ идентичен первому запросу (идемпотентность)
+
+---
+
+**4. Подтверждение холда**
+
+Метод: POST /api/holds/{id}/confirm
+
+Описание: Подтверждает холд и атомарно уменьшает remaining в слоте на 1 с защитой от оверсела. После успешного подтверждения инвалидирует кеш доступности.
+
+**Пример запроса:**
+```
+curl -X POST http://localhost:8000/api/holds/1/confirm
+```
+**Пример ответа (200 OK):**
+```
+{
+"hold_id": 1,
+"slot_id": 1,
+"status": "confirmed",
+"idempotency_key": "550e8400-e29b-41d4-a716-446655440000",
+}
+```
+
+---
+
+5. Отмена холда
+
+Метод: DELETE /api/holds/{id}
+
+Описание: Отменяет подтвержденный холд, меняет статус на cancelled и возвращает место в слот. После успешной отмены инвалидирует кеш доступности.
+
+**Пример запроса:**
+```
+curl -X DELETE http://localhost:8000/api/holds/1
+```
+Пример ответа (200 OK):
+```
+{
+"hold_id": 1,
+"slot_id": 1,
+"status": "cancelled",
+"idempotency_key": "550e8400-e29b-41d4-a716-446655440000",
+"created_at": "2024-01-01T12:00:00+00:00",
+"cancelled_at": "2024-01-01T12:03:00+00:00"
+}
+```
+
+---
+
+## Сценарии тестирования
+
+**1. Идемпотентность при создании холда**
+
+#### Первый запрос - создание холда
+```
+curl -X POST http://localhost:80/api/slots/1/hold -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000"
+```
+#### Второй запрос с тем же ключом - возвращает тот же холд
+```
+curl -X POST http://localhost:80/api/slots/1/hold -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000"
+```
+**2. Конфликт при оверселе (два подтверждения на одно место)**
+
+#### Шаг 1: Создаем два холда
+```
+curl -X POST http://localhost:80/api/slots/1/hold -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000"
+```
+#### Ответ: hold_id = 1
+```
+curl -X POST http://localhost:80/api/slots/1/hold -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440001"
+```
+#### Ответ: hold_id = 2
+
+#### Шаг 2: Подтверждаем первый холд (успешно)
+```
+curl -X POST http://localhost:80/api/holds/1/confirm
+```
+#### Ответ: status = "confirmed"
+
+#### Шаг 3: Подтверждаем второй холд (ошибка, мест нет)
+```
+curl -X POST http://localhost:80/api/holds/2/confirm
+```
+#### Ответ: 409 Conflict
+
+---
+
